@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<workflow-app xmlns="uri:oozie:workflow:1.0" name="floatingpopulations">
+    <start to="extract-floatingpopulations-from-oracle"/>
+
+    <!-- 从主干Oracle的流动人口表（floatingpopulations）抽取数据到HDFS -->
+    <action name="extract-floatingpopulations-from-oracle">
+        <sqoop xmlns="uri:oozie:sqoop-action:1.0">
+            <resource-manager>${resourceManager}</resource-manager>
+            <name-node>${nameNode}</name-node>
+            <prepare>
+                <delete path="${nameNode}/scgrid/fp"/>
+            </prepare>
+            <arg>import</arg>
+            <arg>--connect</arg>
+            <arg>${oracleUrl}</arg>
+            <arg>--username</arg>
+            <arg>${oracleUsername}</arg>
+            <arg>--password</arg>
+            <arg>${oraclePassword}</arg>
+            <arg>--query</arg>
+            <arg>
+                select orginternalcode, to_char(nvl(inflowingdate,createdate), 'yyyy-MM-dd') inflowingdate, orgid,id
+                from floatingpopulations where $CONDITIONS
+            </arg>
+            <arg>--split-by</arg>
+            <arg>id</arg>
+            <arg>-m</arg>
+            <arg>1</arg>
+            <arg>--target-dir</arg>
+            <arg>${oracleOutputDir}</arg>
+        </sqoop>
+        <ok to="city-county-mapreduce"/>
+        <error to="fail"/>
+    </action>
+
+    <!--
+        为流动人口数据设置市orgcode、区县orgcode，并将处理后的数据写入HDFS，
+        处理后只保留orgcode,citycode,countycode,inflowingdate
+    -->
+    <action name="city-county-mapreduce">
+        <map-reduce>
+            <resource-manager>${resourceManager}</resource-manager>
+            <name-node>${nameNode}</name-node>
+            <prepare>
+                <delete path="${nameNode}/scgrid/daily_fp"/>
+            </prepare>
+            <configuration>
+                <property>
+                    <name>hadoop.home.dir</name>
+                    <value>/home/hadoop/hadoop-2.9.1</value>
+                </property>
+                <property>
+                    <name>input</name>
+                    <value>${oracleOutputDir}</value>
+                </property>
+                <property>
+                    <name>output</name>
+                    <value>${cityCountyMapreduceOutputDir}</value>
+                </property>
+                <property>
+                    <name>hiveUrl</name>
+                    <value>${hiveUrl}</value>
+                </property>
+                <property>
+                    <name>hiveUsername</name>
+                    <value>${hiveUsername}</value>
+                </property>
+                <property>
+                    <name>hivePassword</name>
+                    <value>${hivePassword}</value>
+                </property>
+            </configuration>
+            <config-class>com.tianque.mapreduce.CityCountyMapReduceConfigurator</config-class>
+        </map-reduce>
+        <ok to="statistics-daily-floatingpopulations"/>
+        <error to="fail"/>
+    </action>
+
+    <!--
+        根据 citycode（或countycode）,inflowingdate 分组统计各市、各区县每天流动人口新增数，统计结果写入hive
+     -->
+    <action name="statistics-daily-floatingpopulations">
+        <hive2 xmlns="uri:oozie:hive2-action:1.0">
+            <resource-manager>${resourceManager}</resource-manager>
+            <name-node>${nameNode}</name-node>
+            <jdbc-url>${hiveUrl}</jdbc-url>
+            <password>${hivePassword}</password>
+            <script>daily_fp.q</script>
+            <param>input=${cityCountyMapreduceOutputDir}</param>
+            <argument>-n</argument>
+            <argument>${hiveUsername}</argument>
+        </hive2>
+        <ok to="end"/>
+        <error to="fail"/>
+    </action>
+
+    <kill name="fail">
+        <message>floatingpopulations failed, error message[${wf:errorMessage(wf:lastErrorNode())}]</message>
+    </kill>
+    <end name="end"/>
+</workflow-app>

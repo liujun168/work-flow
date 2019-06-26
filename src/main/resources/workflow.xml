@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<workflow-app id="testWorkFlow">
+    <start id="startRun" class=""></start>
+    <action id="act1" package=""></action>
+    <action id="act2" resource=""></action>
+    <action id="act3" url=""></action>
+    <action id="act4" class=""></action>
+    <end id="over"></end>
+
+    <exception id=""></exception>
+</workflow-app>
